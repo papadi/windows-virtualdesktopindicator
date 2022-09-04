@@ -1,10 +1,9 @@
 ﻿using System;
 using System.Windows.Forms;
-using VirtualDesktopIndicator.Api;
 
 namespace VirtualDesktopIndicator
 {
-    class Program
+    static class Program
     {
         [STAThread]
         static void Main()
@@ -14,7 +13,6 @@ namespace VirtualDesktopIndicator
 
             using (TrayIndicator ti = new TrayIndicator())
             {
-                ti.Display();
                 Application.Run();
             }
         }

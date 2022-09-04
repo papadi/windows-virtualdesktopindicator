@@ -1,10 +1,8 @@
-﻿using Microsoft.Win32;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
-using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
 using VirtualDesktopIndicator.Api;
@@ -21,41 +19,25 @@ namespace VirtualDesktopIndicator
 
         private const uint DesktopErrorIndex = 0;
 
-        private NotifyIcon trayIcon;
-        private Timer timer;
+        private readonly NotifyIcon trayIcon;
+        private readonly Timer timer;
 
-        #region Virtual Desktops
+        private readonly ThemeRegistryMonitor themeRegistryMonitor;
 
         private uint previewVirtualDesktop = 0;
 
-        #endregion
-
-        #region Theme
-
-        private const string RegistryThemeDataPath =
-            @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
-
-        private enum Theme { Light, Dark }
-
-        private static readonly Dictionary<Theme, Color[]> ThemesColors = new Dictionary<Theme, Color[]>()
+        private static readonly Dictionary<bool, Color[]> ThemesColors = new Dictionary<bool, Color[]>()
         {
-            { Theme.Dark, new[] { Color.White, Color.Gold, Color.LightGreen, Color.LightSkyBlue } },
-            { Theme.Light, new[] { Color.Black, Color.Gold, Color.Blue, Color.DarkGreen } },
+            { true, new[] { Color.White, Color.Gold, Color.LightGreen, Color.LightSkyBlue } },
+            { false, new[] { Color.Black, Color.Gold, Color.Blue, Color.DarkGreen } },
         };
 
-        private Color GetCurrentThemeColor(uint desktopIndex)
+        private Color GetIconColorBasedOnTheme(uint desktopIndex)
         {
             if (desktopIndex == 0) return Color.Red;    // failed to get desktop index
-            var set = ThemesColors[systemTheme];
+            var set = ThemesColors[themeRegistryMonitor.IsDark];
             return set[Math.Min(desktopIndex, set.Length) - 1];
         }
-
-        private Theme cachedSystemTheme;
-        private Theme systemTheme;
-
-        private RegistryMonitor themePathRegistryMonitor;
-
-        #endregion
 
         #region Drawing data 
 
@@ -84,21 +66,18 @@ namespace VirtualDesktopIndicator
         private int BorderThinkness => Width / BaseWidth;
 
         private int FontSize => (int)Math.Ceiling(Width / 1.5);
-        private FontStyle FontStyle = FontStyle.Bold;
+        private readonly FontStyle FontStyle = FontStyle.Bold;
 
         #endregion
 
         public TrayIndicator()
         {
-            trayIcon = new NotifyIcon { ContextMenuStrip = CreateContextMenu() };
-            trayIcon.Click += TrayIconClick;
+            trayIcon = new NotifyIcon { ContextMenuStrip = CreateContextMenu(), Visible = true };
 
-            timer = new Timer { Enabled = false, Interval = 500 };
+            timer = new Timer { Enabled = true, Interval = 500 };
             timer.Tick += TimerTick;
-
-            InitRegistryMonitor();
-
-            cachedSystemTheme = systemTheme = GetSystemTheme();
+            
+            themeRegistryMonitor = new ThemeRegistryMonitor();
         }
 
         private static IVirtualDesktopApi GetActualDesktopApi()
@@ -112,8 +91,6 @@ namespace VirtualDesktopIndicator
                 return new Previous();
             }
         }
-
-        #region Events
 
         private void TimerTick(object sender, EventArgs e)
         {
@@ -136,61 +113,11 @@ namespace VirtualDesktopIndicator
             }
         }
 
-        private void TrayIconClick(object sender, EventArgs e)
-        {
-            /*
-            MouseEventArgs me = e as MouseEventArgs;
-
-            if (me.Button == MouseButtons.Left)
-                ShowTaskView();
-            */
-        }
-
-        #endregion
-
-        public void Display()
-        {
-            themePathRegistryMonitor.Start();
-
-            trayIcon.Visible = true;
-            timer.Enabled = true;
-        }
-
         public void Dispose()
         {
-            StopRegistryMonitor();
-
-            trayIcon.Dispose();
-            timer.Dispose();
-        }
-
-        private void InitRegistryMonitor()
-        {
-            themePathRegistryMonitor = new RegistryMonitor(RegistryThemeDataPath);
-
-            themePathRegistryMonitor.RegChanged += OnThemeRegistryChanged;
-            themePathRegistryMonitor.Error += OnThemeRegistryError;
-        }
-
-        private void StopRegistryMonitor()
-        {
-            if (themePathRegistryMonitor == null) return;
-
-            themePathRegistryMonitor.Stop();
-            themePathRegistryMonitor.RegChanged -= OnThemeRegistryChanged;
-            themePathRegistryMonitor.Error -= OnThemeRegistryError;
-            themePathRegistryMonitor = null;
-        }
-
-        public static void ShowTaskView()
-        {
-            /*
-             * Unimplemented!
-             * I didn't find a efficient way to launch task viewer.
-             * Each of them has problems, but here are some solutions:
-             *   1. Run "explorer shell:::{3080F90E-D7AD-11D9-BD98-0000947B0257}"
-             *   2. Simulating <Win + Tab>
-             */
+            themeRegistryMonitor?.Dispose();
+            trayIcon?.Dispose();
+            timer?.Dispose();
         }
 
         private ContextMenuStrip CreateContextMenu()
@@ -227,7 +154,7 @@ namespace VirtualDesktopIndicator
 
         private void GenerateIcon(uint desktopIndex)
         {
-            var color = GetCurrentThemeColor(desktopIndex);
+            var color = GetIconColorBasedOnTheme(desktopIndex);
             var font = new Font("", FontSize, FontStyle, GraphicsUnit.Pixel);   // use default font
             var brush = new SolidBrush(color);
             var bitmap = new Bitmap(Width, Height);
@@ -280,21 +207,5 @@ namespace VirtualDesktopIndicator
                 trayIcon.Icon = null;
             }
         }
-
-        private Theme GetSystemTheme()
-        {
-            return (int)Registry.GetValue(RegistryThemeDataPath, "SystemUsesLightTheme", 0) == 1 ?
-                     Theme.Light :
-                     Theme.Dark;
-        }
-
-        private void OnThemeRegistryChanged(object sender, EventArgs e)
-        {
-            systemTheme = GetSystemTheme();
-            if (systemTheme == cachedSystemTheme) return;
-            cachedSystemTheme = systemTheme;
-        }
-
-        private void OnThemeRegistryError(object sender, ErrorEventArgs e) => StopRegistryMonitor();
     }
 }
