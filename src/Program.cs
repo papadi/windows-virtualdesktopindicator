@@ -12,22 +12,10 @@ namespace VirtualDesktopIndicator
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            using (TrayIndicator ti = new TrayIndicator(GetActualDesktopApi()))
+            using (TrayIndicator ti = new TrayIndicator())
             {
                 ti.Display();
                 Application.Run();
-            }
-        }
-
-        private static IVirtualDesktopApi GetActualDesktopApi()
-        {
-            if (Environment.OSVersion.Version.Build >= 22000)
-            {
-                return new Latest();
-            }
-            else
-            {
-                return new Previous();
             }
         }
     }

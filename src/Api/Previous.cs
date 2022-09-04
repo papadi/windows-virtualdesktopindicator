@@ -5,12 +5,11 @@ namespace VirtualDesktopIndicator.Api
 {
     class Previous : IVirtualDesktopApi
     {
-        public uint Current()
+        public uint GetCurrent()
         {
             var currentDesktop = DesktopManager.VirtualDesktopManagerInternal.GetCurrentDesktop();
             var currentDesktopIndex = DesktopManager.GetDesktopIndex(currentDesktop);
-
-            return (uint)currentDesktopIndex;
+            return (uint)currentDesktopIndex + 1;
         }
 
         #region COM Guids

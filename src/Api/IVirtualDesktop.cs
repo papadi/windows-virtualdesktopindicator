@@ -8,6 +8,6 @@ namespace VirtualDesktopIndicator.Api
 {
     interface IVirtualDesktopApi
     {
-        uint Current();
+        uint GetCurrent();
     }
 }

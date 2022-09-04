@@ -5,12 +5,39 @@ namespace VirtualDesktopIndicator.Api
 {
     class Latest : IVirtualDesktopApi
     {
-        public uint Current()
-        {
-            var currentDesktop = DesktopManager.VirtualDesktopManagerInternal.GetCurrentDesktop(IntPtr.Zero);
-            var currentDesktopIndex = DesktopManager.GetDesktopIndex(currentDesktop);
+        private IVirtualDesktopManagerInternal _virtualDesktopManagerInternal;
 
-            return (uint)currentDesktopIndex;
+        public Latest()
+        {
+            var shell = (IServiceProvider10)Activator.CreateInstance(Type.GetTypeFromCLSID(Guids.CLSID_ImmersiveShell));
+            _virtualDesktopManagerInternal = (IVirtualDesktopManagerInternal)shell.QueryService(Guids.CLSID_VirtualDesktopManagerInternal, typeof(IVirtualDesktopManagerInternal).GUID);
+        }
+
+        public uint GetCurrent()
+        {
+            var desktop = _virtualDesktopManagerInternal.GetCurrentDesktop(IntPtr.Zero);
+            var currentDesktopIndex = GetDesktopIndex(desktop);
+            return (uint)currentDesktopIndex + 1;
+        }
+
+        internal int GetDesktopIndex(IVirtualDesktop desktop)
+        {
+            int index = -1;
+            Guid IdSearch = desktop.GetId();
+            IObjectArray desktops;
+            _virtualDesktopManagerInternal.GetDesktops(IntPtr.Zero, out desktops);
+            object objdesktop;
+            for (int i = 0; i < _virtualDesktopManagerInternal.GetCount(IntPtr.Zero); i++)
+            {
+                desktops.GetAt(i, typeof(IVirtualDesktop).GUID, out objdesktop);
+                if (IdSearch.CompareTo(((IVirtualDesktop)objdesktop).GetId()) == 0)
+                {
+                    index = i;
+                    break;
+                }
+            }
+            Marshal.ReleaseComObject(desktops);
+            return index;
         }
 
         #region COM Guids
@@ -180,33 +207,13 @@ namespace VirtualDesktopIndicator.Api
 
         internal static class DesktopManager
         {
-            internal static IVirtualDesktopManagerInternal VirtualDesktopManagerInternal;
-
+            
             static DesktopManager()
             {
-                var shell = (IServiceProvider10)Activator.CreateInstance(Type.GetTypeFromCLSID(Guids.CLSID_ImmersiveShell));
-                VirtualDesktopManagerInternal = (IVirtualDesktopManagerInternal)shell.QueryService(Guids.CLSID_VirtualDesktopManagerInternal, typeof(IVirtualDesktopManagerInternal).GUID);
+                
             }
 
-            internal static int GetDesktopIndex(IVirtualDesktop desktop)
-            {
-                int index = -1;
-                Guid IdSearch = desktop.GetId();
-                IObjectArray desktops;
-                VirtualDesktopManagerInternal.GetDesktops(IntPtr.Zero, out desktops);
-                object objdesktop;
-                for (int i = 0; i < VirtualDesktopManagerInternal.GetCount(IntPtr.Zero); i++)
-                {
-                    desktops.GetAt(i, typeof(IVirtualDesktop).GUID, out objdesktop);
-                    if (IdSearch.CompareTo(((IVirtualDesktop)objdesktop).GetId()) == 0)
-                    {
-                        index = i;
-                        break;
-                    }
-                }
-                Marshal.ReleaseComObject(desktops);
-                return index;
-            }
+            
         }
 
         #endregion

@@ -19,14 +19,14 @@ namespace VirtualDesktopIndicator
 
         private IVirtualDesktopApi virtualDesktopProxy;
 
+        private const uint DesktopErrorIndex = 0;
+
         private NotifyIcon trayIcon;
         private Timer timer;
 
         #region Virtual Desktops
 
         private uint previewVirtualDesktop = 0;
-
-        private uint CurrentVirtualDesktop => virtualDesktopProxy.Current() + 1;
 
         #endregion
 
@@ -43,19 +43,17 @@ namespace VirtualDesktopIndicator
             { Theme.Light, new[] { Color.Black, Color.Gold, Color.Blue, Color.DarkGreen } },
         };
 
-        private Color CurrentThemeColor
+        private Color GetCurrentThemeColor(uint desktopIndex)
         {
-            get
-            {
-                var set = ThemesColors[systemTheme];
-                return set[Math.Min(CurrentVirtualDesktop, set.Length) - 1];
-            }
+            if (desktopIndex == 0) return Color.Red;    // failed to get desktop index
+            var set = ThemesColors[systemTheme];
+            return set[Math.Min(desktopIndex, set.Length) - 1];
         }
 
         private Theme cachedSystemTheme;
         private Theme systemTheme;
 
-        private RegistryMonitor registryMonitor;
+        private RegistryMonitor themePathRegistryMonitor;
 
         #endregion
 
@@ -85,27 +83,34 @@ namespace VirtualDesktopIndicator
 
         private int BorderThinkness => Width / BaseWidth;
 
-        private const string FontName = "Segoe";
         private int FontSize => (int)Math.Ceiling(Width / 1.5);
         private FontStyle FontStyle = FontStyle.Bold;
 
-        string cachedDisplayText;
-
         #endregion
 
-        public TrayIndicator(IVirtualDesktopApi virtualDesktop)
+        public TrayIndicator()
         {
-            virtualDesktopProxy = virtualDesktop;
-
             trayIcon = new NotifyIcon { ContextMenuStrip = CreateContextMenu() };
             trayIcon.Click += TrayIconClick;
 
-            timer = new Timer { Enabled = false };
+            timer = new Timer { Enabled = false, Interval = 500 };
             timer.Tick += TimerTick;
 
             InitRegistryMonitor();
 
             cachedSystemTheme = systemTheme = GetSystemTheme();
+        }
+
+        private static IVirtualDesktopApi GetActualDesktopApi()
+        {
+            if (Environment.OSVersion.Version.Build >= 22000)
+            {
+                return new Latest();
+            }
+            else
+            {
+                return new Previous();
+            }
         }
 
         #region Events
@@ -114,23 +119,20 @@ namespace VirtualDesktopIndicator
         {
             try
             {
-                if (CurrentVirtualDesktop == previewVirtualDesktop) return;
+                if (virtualDesktopProxy == null) virtualDesktopProxy = GetActualDesktopApi();
+                var currentVirtualDesktop = virtualDesktopProxy.GetCurrent();
+                if (currentVirtualDesktop == previewVirtualDesktop) return;
 
-                cachedDisplayText = CurrentVirtualDesktop < 100 ? CurrentVirtualDesktop.ToString() : "++";
-                previewVirtualDesktop = CurrentVirtualDesktop;
+                previewVirtualDesktop = currentVirtualDesktop;
 
-                RedrawIcon();
+                GenerateIcon(currentVirtualDesktop);
             }
-            catch
+            catch (Exception ex)
             {
-                MessageBox.Show(
-                    "An unhandled error occured!",
-                    "VirtualDesktopIndicator",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error
-                );
-
-                Application.Exit();
+                previewVirtualDesktop = DesktopErrorIndex;
+                GenerateIcon(DesktopErrorIndex);
+                virtualDesktopProxy = null; // failed - set to null to re-initialize in case explorer crashed
+                // TODO: LOG THE ERROR
             }
         }
 
@@ -148,7 +150,7 @@ namespace VirtualDesktopIndicator
 
         public void Display()
         {
-            registryMonitor.Start();
+            themePathRegistryMonitor.Start();
 
             trayIcon.Visible = true;
             timer.Enabled = true;
@@ -164,25 +166,20 @@ namespace VirtualDesktopIndicator
 
         private void InitRegistryMonitor()
         {
-            registryMonitor = new RegistryMonitor(RegistryThemeDataPath);
+            themePathRegistryMonitor = new RegistryMonitor(RegistryThemeDataPath);
 
-            registryMonitor.RegChanged += new EventHandler(OnRegistryChanged);
-            registryMonitor.Error += new ErrorEventHandler(OnRegistryError);
+            themePathRegistryMonitor.RegChanged += OnThemeRegistryChanged;
+            themePathRegistryMonitor.Error += OnThemeRegistryError;
         }
 
         private void StopRegistryMonitor()
         {
-            if (registryMonitor == null) return;
+            if (themePathRegistryMonitor == null) return;
 
-            registryMonitor.Stop();
-            registryMonitor.RegChanged -= new EventHandler(OnRegistryChanged);
-            registryMonitor.Error -= new System.IO.ErrorEventHandler(OnRegistryError);
-            registryMonitor = null;
-        }
-
-        private void RedrawIcon()
-        {
-            trayIcon.Icon = GenerateIcon();
+            themePathRegistryMonitor.Stop();
+            themePathRegistryMonitor.RegChanged -= OnThemeRegistryChanged;
+            themePathRegistryMonitor.Error -= OnThemeRegistryError;
+            themePathRegistryMonitor = null;
         }
 
         public static void ShowTaskView()
@@ -228,11 +225,13 @@ namespace VirtualDesktopIndicator
             return menu;
         }
 
-        private Icon GenerateIcon()
+        private void GenerateIcon(uint desktopIndex)
         {
-            var font = new Font(FontName, FontSize, FontStyle, GraphicsUnit.Pixel);
-            var brush = new SolidBrush(CurrentThemeColor);
+            var color = GetCurrentThemeColor(desktopIndex);
+            var font = new Font("", FontSize, FontStyle, GraphicsUnit.Pixel);   // use default font
+            var brush = new SolidBrush(color);
             var bitmap = new Bitmap(Width, Height);
+            var displayText = desktopIndex == DesktopErrorIndex ? "?" : (desktopIndex < 100 ? desktopIndex.ToString() : "++");
 
             var g = Graphics.FromImage(bitmap);
 
@@ -244,7 +243,7 @@ namespace VirtualDesktopIndicator
             // Draw border
             // The g.DrawRectangle always uses anti-aliasing and border looks very poor at such small resolutions
             // Implement own hack!
-            var pen = new Pen(CurrentThemeColor, 1);
+            var pen = new Pen(color, 1);
             for (int o = 0; o < BorderThinkness; o++)
             {
                 // Top
@@ -261,24 +260,24 @@ namespace VirtualDesktopIndicator
             }
 
             // Draw text
-            var textSize = g.MeasureString(cachedDisplayText, font);
+            var textSize = g.MeasureString(displayText, font);
 
             // Сalculate padding to center the text
             // We can't assume that g.DrawString will round the coordinates correctly, so we do it manually
             var offsetX = (float)Math.Ceiling((Width - textSize.Width) / 2);
             var offsetY = (float)Math.Ceiling((Height - textSize.Height - 2) / 2);
 
-            g.DrawString(cachedDisplayText, font, brush, offsetX, offsetY);
+            g.DrawString(displayText, font, brush, offsetX, offsetY);
 
             // Create icon from bitmap and return it
             // bitmapText.GetHicon() can throw exception
             try
             {
-                return Icon.FromHandle(bitmap.GetHicon());
+                trayIcon.Icon = Icon.FromHandle(bitmap.GetHicon());
             }
             catch
             {
-                return null;
+                trayIcon.Icon = null;
             }
         }
 
@@ -289,15 +288,13 @@ namespace VirtualDesktopIndicator
                      Theme.Dark;
         }
 
-        private void OnRegistryChanged(object sender, EventArgs e)
+        private void OnThemeRegistryChanged(object sender, EventArgs e)
         {
             systemTheme = GetSystemTheme();
             if (systemTheme == cachedSystemTheme) return;
-
-            RedrawIcon();
             cachedSystemTheme = systemTheme;
         }
 
-        private void OnRegistryError(object sender, ErrorEventArgs e) => StopRegistryMonitor();
+        private void OnThemeRegistryError(object sender, ErrorEventArgs e) => StopRegistryMonitor();
     }
 }
