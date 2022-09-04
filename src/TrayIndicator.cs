@@ -12,8 +12,7 @@ namespace VirtualDesktopIndicator
 {
     class TrayIndicator : IDisposable
     {
-        private static string AppName =>
-            Assembly.GetExecutingAssembly().GetName().Name;
+        private static string AppName => Assembly.GetExecutingAssembly().GetName().Name;
 
         private IVirtualDesktopApi virtualDesktopProxy;
 
